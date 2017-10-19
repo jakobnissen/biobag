@@ -18,6 +18,10 @@ __misctools.py__
 A collection of useful Python functions like a function for buffered printing to a file, iterating over a FASTA file,
 creating directories which fail in a threadsafe way, and calculating statistics on assemblies.
 
+__misctools.ipynb__
+
+A short tutorial for some of the functionality of the misctools.
+
 __parsebins.py__
 
 Parses a directory of FASTA files representing bins.

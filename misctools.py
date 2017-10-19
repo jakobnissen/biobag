@@ -10,65 +10,6 @@ Author: Jakob Nybo Nissen, DTU Bioinformatics
 import collections as _collections
 
 
-genetic_code = {
-    ('A', 'A', 'A'): 'K', ('A', 'A', 'G'): 'K', ('A', 'A', 'T'): 'N', ('A', 'A', 'C'): 'N', 
-    ('A', 'G', 'A'): 'R', ('A', 'G', 'G'): 'R', ('A', 'G', 'T'): 'S', ('A', 'G', 'C'): 'S', 
-    ('A', 'T', 'A'): 'I', ('A', 'T', 'G'): 'M', ('A', 'T', 'T'): 'I', ('A', 'T', 'C'): 'I', 
-    ('A', 'C', 'A'): 'T', ('A', 'C', 'G'): 'T', ('A', 'C', 'T'): 'T', ('A', 'C', 'C'): 'T', 
-    ('G', 'A', 'A'): 'E', ('G', 'A', 'G'): 'E', ('G', 'A', 'T'): 'D', ('G', 'A', 'C'): 'D', 
-    ('G', 'G', 'A'): 'G', ('G', 'G', 'G'): 'G', ('G', 'G', 'T'): 'G', ('G', 'G', 'C'): 'G', 
-    ('G', 'T', 'A'): 'V', ('G', 'T', 'G'): 'V', ('G', 'T', 'T'): 'V', ('G', 'T', 'C'): 'V', 
-    ('G', 'C', 'A'): 'A', ('G', 'C', 'G'): 'A', ('G', 'C', 'T'): 'A', ('G', 'C', 'C'): 'A', 
-    ('T', 'A', 'A'): '*', ('T', 'A', 'G'): '*', ('T', 'A', 'T'): 'Y', ('T', 'A', 'C'): 'Y', 
-    ('T', 'G', 'A'): '*', ('T', 'G', 'G'): 'W', ('T', 'G', 'T'): 'C', ('T', 'G', 'C'): 'C', 
-    ('T', 'T', 'A'): 'L', ('T', 'T', 'G'): 'L', ('T', 'T', 'T'): 'F', ('T', 'T', 'C'): 'F', 
-    ('T', 'C', 'A'): 'S', ('T', 'C', 'G'): 'S', ('T', 'C', 'T'): 'S', ('T', 'C', 'C'): 'S', 
-    ('C', 'A', 'A'): 'Q', ('C', 'A', 'G'): 'Q', ('C', 'A', 'T'): 'H', ('C', 'A', 'C'): 'H', 
-    ('C', 'G', 'A'): 'R', ('C', 'G', 'G'): 'R', ('C', 'G', 'T'): 'R', ('C', 'G', 'C'): 'R', 
-    ('C', 'T', 'A'): 'L', ('C', 'T', 'G'): 'L', ('C', 'T', 'T'): 'L', ('C', 'T', 'C'): 'L', 
-    ('C', 'C', 'A'): 'P', ('C', 'C', 'G'): 'P', ('C', 'C', 'T'): 'P', ('C', 'C', 'C'): 'P', 
-    }
-
-
-def timed(function):
-    """Decorator adding a timer to a function,
-    and prints the time elapsed in the terminal. Just eye candy."""
-    
-    def inner(*args, **kwargs):
-        begin = time()
-        result = function(*args, **kwargs)
-        print('\tDone in {:,.2f} seconds'.format(time() - begin))
-        return result
-    
-    return inner
-
-
-def convertsecs(seconds):
-    days, seconds = divmod(int(seconds), 86400)
-    hours, seconds = divmod(seconds, 3600)
-    minutes, seconds = divmod(seconds, 60)
-    
-    output = list()
-    for value, symbol in zip((days, hours, minutes, seconds), 'dhms'):
-        if value:
-            output.append('{}{}'.format(value, symbol))
-            
-    return ' '.join(output)
-
-
-def mkdir(name, indent=False):
-    """Creates a new directory in a threadsafe way."""
-    
-    try:
-        os.mkdir(name)
-    except FileExistsError:
-        if os.path.isfile(name):
-            raise
-        print('\t'*indent + 'Directory {} already exists, skipping creation.'.format(name))
-    else:
-        print('\t'*indent + 'Creating directory "{}".'.format(name))
-
-
 def streamprint(iterator, filehandle, bufferlength=10000, sep='\n'):
     """Given an iterator of lines and a filehandle, prints the content of the
     iterator to the file in a memory-efficient way.
@@ -262,7 +203,7 @@ class FastaEntry:
 
 
 def iterfasta(filehandle, FastaEntry=FastaEntry):
-    """A generator which yield FastaEntries from an open fasta file.
+    """A generator which yields FastaEntries from an open fasta file.
     
     Usage:
     >>> with open('myfile.fasta') as fastafile:
@@ -272,13 +213,17 @@ def iterfasta(filehandle, FastaEntry=FastaEntry):
     ...         [ DO STUFF ]
     """
     
+    # Skip to first header
+    for probeline in file:
+        if probeline.startswith('>'):
+            break
+    else: # nobreak
+        raise ValueError('No headers in this file.')
+    
+    header = probeline.strip('>\n')
     buffer = list()
     
-    header = next(filehandle).strip()
-    if not header.startswith('>'):
-        raise ValueError('First line is not a header')
-    header = header[1:]
-    
+    # Iterate over lines
     for line in map(str.rstrip, filehandle):
         if line.startswith('>'): 
             yield FastaEntry(header, ''.join(buffer))
@@ -289,6 +234,40 @@ def iterfasta(filehandle, FastaEntry=FastaEntry):
             buffer.append(line)
             
     yield FastaEntry(header, ''.join(buffer))
+
+
+def simplefastaiter(filehandle):
+    """Yields (header, sequence) tuples from an open fasta file.
+    
+    Usage:
+    >>> with open('myfile.fasta') as fastafile:
+    ...     entries = iterfasta(fastafile)
+    ...
+    ...     for entry in entries:
+    ...         [ DO STUFF ]
+    """
+    
+    # Skip to first header
+    for probeline in file:
+        if probeline.startswith('>'):
+            break
+    else: # nobreak
+        raise ValueError('No headers in this file.')
+    
+    header = probeline.strip('>\n')
+    buffer = list()
+    
+    # Iterate over lines
+    for line in map(str.rstrip, filehandle):
+        if line.startswith('>'): 
+            yield header, ''.join(buffer
+            buffer.clear()
+            header = line[1:]
+            
+        else:
+            buffer.append(line)
+            
+    yield header, ''.join(buffer)
 
 
 SamLineBase = _collections.namedtuple('SamLineBase', ['qname', 'flag', 'rname', 'pos',
