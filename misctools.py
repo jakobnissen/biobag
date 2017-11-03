@@ -214,7 +214,7 @@ def iterfasta(filehandle, FastaEntry=FastaEntry):
     """
     
     # Skip to first header
-    for probeline in file:
+    for probeline in filehandle:
         if probeline.startswith('>'):
             break
     else: # nobreak
@@ -248,7 +248,7 @@ def simplefastaiter(filehandle):
     """
     
     # Skip to first header
-    for probeline in file:
+    for probeline in filehandle:
         if probeline.startswith('>'):
             break
     else: # nobreak

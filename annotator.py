@@ -186,7 +186,7 @@ def naively_summarize_bin(taxidpairs, scorer=scorer, introspect=False, nanvalues
         if introspect:
             
             
-            print('{} (rankwide score: {})'.format(taxranks[rank], round(globalscore, 1)))
+            print('{} (rankwide score: {})'.format(taxranks[rank] if rank < 7 else "subclass", round(globalscore, 1)))
             for row in range(min(3, len(mostcommons))):
                 taxon, score = mostcommons[row]
                 shortened = taxon[:16] + '...' if len(taxon) > 19 else taxon
@@ -243,7 +243,7 @@ def naive_summary(bindict, diamondout, returntax=False):
             gene, _, identity, *__, taxonomy = line.split('\t')
             
             # Remove gene name and linebreak from taxonomy
-            taxonomy = taxonomy.partition(' ')[2].rstrip()
+            taxonomy = taxonomy.rstrip()
             identity = float(identity) / 100
             taxdict[gene] = (taxonomy, identity)
     
@@ -279,11 +279,11 @@ def introspect(binname):
     return naively_summarize_bin(taxidispairs, introspect=True)
 
 
-#path = '/mnt/computerome/people/jakni/archaea/archaeaout/metabat/'
-#bindict, taxdict = meditate(path+'bintable.txt', path+'fields')
+#path = '/mnt/computerome/people/jakni/marsupial/withspades/metabatbmc/'
+#bindict, taxdict = meditate(path+'bintable.txt', path+'diamonduniprot.txt')
 
 
-#genes = bindict['bin.11']
+#genes = bindict['bin.1591']
 #taxes = [taxdict[gene] for gene in genes if gene in taxdict]
 
 
@@ -320,7 +320,7 @@ if __name__ == '__main__':
     parser.add_argument('-b', metavar='diamond', default='/services/tools/diamond/0.8.31/diamond',
                         dest='diamondpath', help='path to diamond blast executable. [preset]')
     parser.add_argument('-d', dest='database', metavar='database',
-            default='/home/projects/metagenomics/data/uniprot/swissprot.dmnd',
+            default='/home/projects/metagenomics/data/uniprot/uniprot.dmnd',
                         help='path to diamond database. [preset]')
     parser.add_argument('-c', dest='cores', metavar='cores', type=int, default=cpus,
         help='no. of cores to use for diamondblasting [{}]'.format(cpus))
