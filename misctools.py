@@ -164,13 +164,7 @@ class FastaEntry:
             return self.sequence == other
         
     def __getitem__(self, index):
-        return self.sequence[2]
-    
-    def __setattr__(self, attribute, value):
-        if attribute == 'header':
-            raise AttributeError('FastaEntries headers cannot be modified.')
-        else:
-            object.__setattr__(self, attribute, value)
+        return self.sequence[index]
     
     def reversecomplement(self, d=dict(zip('ACGTMRWSYKVHDBN', 'TGCAKYWSRMBDHVN'))):
         try:
@@ -260,7 +254,7 @@ def simplefastaiter(filehandle):
     # Iterate over lines
     for line in map(str.rstrip, filehandle):
         if line.startswith('>'): 
-            yield header, ''.join(buffer
+            yield header, ''.join(buffer)
             buffer.clear()
             header = line[1:]
             
@@ -268,6 +262,36 @@ def simplefastaiter(filehandle):
             buffer.append(line)
             
     yield header, ''.join(buffer)
+
+
+def fasta_byte_iterator(filehandle):
+    "Yields writeable Numpy char arrays from a binary opened fasta file."
+
+    # Skip to first header
+    for probeline in filehandle:
+        if probeline.startswith(b'>'):
+            break
+    else: # nobreak
+        raise ValueError('No headers in this file.')
+
+    header = probeline.strip(b'>\n')
+    buffer = list()
+
+    # Iterate over lines
+    for line in map(bytes.rstrip, filehandle):
+        if line.startswith(b'>'):
+            array = np.frombuffer(b''.join(buffer), dtype=np.uint8)
+            array.flags['WRITEABLE'] = True
+            yield header, array
+            buffer.clear()
+            header = line[1:]
+
+        else:
+            buffer.append(line)
+
+    array = np.frombuffer(b''.join(buffer), dtype=np.uint8)
+    array.flags['WRITEABLE'] = True
+    yield header, array
 
 
 SamLineBase = _collections.namedtuple('SamLineBase', ['qname', 'flag', 'rname', 'pos',
