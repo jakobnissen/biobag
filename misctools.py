@@ -8,6 +8,28 @@ Author: Jakob Nybo Nissen, DTU Bioinformatics
 
 
 import collections as _collections
+import gzip as _gzip
+
+
+class Opener:
+    def __init__(self, filename, readmode='r'):
+        self.filename = filename
+        self.readmode = readmode
+    
+    def __enter__(self):
+        with open(self.filename, 'rb') as f:
+            signature = f.peek(2)[:2]
+        
+        if tuple(signature) == (31, 139):
+            self.filehandle = _gzip.open(self.filename, self.readmode)
+            return map(bytes.decode, self.filehandle)
+        
+        else:
+            self.filehandle = open(self.filename, self.readmode)
+            return self.filehandle
+    
+    def __exit__(self, type, value, traceback):
+        self.filehandle.close()
 
 
 def streamprint(iterator, filehandle, bufferlength=10000, sep='\n'):
@@ -166,17 +188,16 @@ class FastaEntry:
     def __getitem__(self, index):
         return self.sequence[index]
     
-    def reversecomplement(self, d=dict(zip('ACGTMRWSYKVHDBN', 'TGCAKYWSRMBDHVN'))):
+    def reversecomplemented(self, d=dict(zip('ACGTMRWSYKVHDBN', 'TGCAKYWSRMBDHVN'))):
         try:
             complemented = ''.join([d[n] for n in reversed(self.sequence)])
         except KeyError as exception:
             exception.args = (f'{exception.args[0]} is not a valid DNA base',)
             raise
-            
-        self.sequence = complemented
-        return self
+        
+        return FastaEntry(self.header, complemented)
     
-    def translate(self, endatstop=False):
+    def translated(self, endatstop=False):
         codons = zip(*[iter(self.sequence)] * 3)
         try:
             translated = ''.join(self.genetic_code.get(codon) for codon in codons)
@@ -191,9 +212,8 @@ class FastaEntry:
             
             elif stoppos != -1:
                 translated = translated[:stoppos]
-            
-        self.sequence = translated
-        return self
+                
+        return FastaEntry(self.header, translated)
 
 
 def iterfasta(filehandle, FastaEntry=FastaEntry):
@@ -230,7 +250,7 @@ def iterfasta(filehandle, FastaEntry=FastaEntry):
     yield FastaEntry(header, ''.join(buffer))
 
 
-def simplefastaiter(filehandle):
+def simple_iterfasta(filehandle):
     """Yields (header, sequence) tuples from an open fasta file.
     
     Usage:
@@ -262,36 +282,6 @@ def simplefastaiter(filehandle):
             buffer.append(line)
             
     yield header, ''.join(buffer)
-
-
-def fasta_byte_iterator(filehandle):
-    "Yields writeable Numpy char arrays from a binary opened fasta file."
-
-    # Skip to first header
-    for probeline in filehandle:
-        if probeline.startswith(b'>'):
-            break
-    else: # nobreak
-        raise ValueError('No headers in this file.')
-
-    header = probeline.strip(b'>\n')
-    buffer = list()
-
-    # Iterate over lines
-    for line in map(bytes.rstrip, filehandle):
-        if line.startswith(b'>'):
-            array = np.frombuffer(b''.join(buffer), dtype=np.uint8)
-            array.flags['WRITEABLE'] = True
-            yield header, array
-            buffer.clear()
-            header = line[1:]
-
-        else:
-            buffer.append(line)
-
-    array = np.frombuffer(b''.join(buffer), dtype=np.uint8)
-    array.flags['WRITEABLE'] = True
-    yield header, array
 
 
 SamLineBase = _collections.namedtuple('SamLineBase', ['qname', 'flag', 'rname', 'pos',
@@ -537,52 +527,6 @@ def iterfastq(filehandle, singleline=False, FastqEntry=FastqEntry):
                 seqbuffer.append(line)
                 
         yield FastqEntry(header, ''.join(seqbuffer), ''.join(qualbuffer))
-
-
-def assemblystats(inputstring, thresholds=[10000, 5000, 1000]):
-    """Expects the output from following command as input:
-    For SPAdes: grep '>' contigs.fasta | cut -d_ -f4 | sort -nr | uniq -c
-    For MEGAHIT: grep '>' final.contigs.fa | cut -d= -f4 | sort -nr | uniq -c
-    
-    Returns n_contigs, largest_contig, N50, n_nucleotides_above_each_threshold,
-    total nucleotides."""
-    
-    lines = (line.split() for line in inputstring.splitlines())
-    counter = tuple((int(length), int(count)) for count, length in lines)
-    
-    if not 0 in thresholds:
-        thresholds = sorted(list(thresholds) + [0], reverse=True)
-    else:
-        thresholds = sorted(thresholds, reverse=True)
-    
-    thresholditer = iter(thresholds)
-    threshold = next(thresholditer)
-    
-    nucleotides = list()
-    runningcount = 0
-    n50 = 0
-    
-    assemblylength = sum(length*count for length, count in counter)
-    ncontigs = sum(entry[1] for entry in counter)
-    largestcontig = counter[0][0]
-    
-    for length, count in counter:
-        while length < threshold:
-            nucleotides.append(runningcount)
-            threshold = next(thresholditer)
-            
-        runningcount += length * count
-
-        if runningcount > assemblylength/2 and n50 == 0:
-            n50 = length
-            
-    for remainingthreshold in [threshold] + list(thresholditer):
-        if remainingthreshold < length or not nucleotides:
-            nucleotides.append(runningcount)
-        else:
-            nucleotides.append(nucleotides[-1])
-            
-    return (ncontigs, largestcontig, n50, *nucleotides)
 
 
 ### Need to check all the new functionality of FastaEntry
