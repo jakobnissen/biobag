@@ -19,7 +19,7 @@ def zscore(array, axis=None, inplace=False):
         raise _np.AxisError('array only has {} axes'.format(array.ndim))
         
     if inplace and array.dtype not in (_np.float, _np.float16, _np.float32, _np.float64, _np.float128):
-            raise TypeError('Cannot convert a non-float array to zscores')
+        raise TypeError('Cannot convert a non-float array to zscores')
         
     mean = array.mean(axis=axis)
     std = array.std(axis=axis)

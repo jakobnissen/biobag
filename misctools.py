@@ -232,7 +232,7 @@ class FastaEntry:
         return '<FastaEntry {}>'.format(self.header)
     
     def reversecomplemented(self):
-        stripped = self.sequence.translate(delete=self.iupacdna_alphabet)
+        stripped = self.sequence.translate(None, delete=self.iupacdna_alphabet)
         if len(stripped) > 0:
             raise ValueError("Non-IUPAC DNA char found: '" + stripped[0] +"'")
         

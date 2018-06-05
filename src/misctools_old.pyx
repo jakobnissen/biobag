@@ -1,7 +1,7 @@
 #cython: language_level=3, boundscheck=False, wraparound=False, cdivision=True, initializedcheck=False
 
-import array
-from cpython cimport array
+import numpy as _np
+import cython
 
 # Notes/assumptions for nucleotide counters:
 # 1) Contigs ONLY consists of values 64, 67, 71, 84, NOTHING ELSE
@@ -12,8 +12,7 @@ from cpython cimport array
 # E.g CCTA is the 92nd alphabetic 4mer, whose reverse complement, TAGG, is the 202nd.
 # So the 92th and 202th value in this array is the same.
 # Hence we can map 256 4mers to 136 normal OR reverse-complemented ones
-cdef unsigned char[:] complementer_fourmer = bytearray([0, 1, 2, 3, 4, 5, 6, 7, 
-        8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
+cdef unsigned char[:] complementer = _np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
         18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 11, 31, 32,
         33, 34, 35, 36, 37, 38, 39, 40, 41, 23, 42, 43, 44, 7, 45, 46,
         47, 48, 49, 50, 51, 34, 52, 53, 54, 19, 55, 56, 57, 3, 58, 59,
@@ -29,10 +28,10 @@ cdef unsigned char[:] complementer_fourmer = bytearray([0, 1, 2, 3, 4, 5, 6, 7,
         42, 128, 114, 79, 28, 129, 106, 67, 12, 130, 124, 96, 52, 131,
         119, 87, 39, 132, 112, 76, 24, 128, 104, 64, 8, 133, 123, 94,
         49, 134, 117, 84, 35, 131, 110, 73, 20, 127, 102, 61, 4, 135,
-        121, 91, 45, 133, 115, 81, 31, 130, 108, 70, 16, 126, 100, 58, 0])
+        121, 91, 45, 133, 115, 81, 31, 130, 108, 70, 16, 126, 100, 58, 0], dtype=_np.uint8)
 
-cdef unsigned char[:] complementer_432mer = bytearray([  0,   1,   2,   3,   4,
-        5,   6,   7,   8,   9,  10,  11,  12,
+# This is the same, but for both 4mers, 3mers and 2mers
+cdef unsigned char[:] complementer2 = _np.array([  0,   1,   2,   3,   4,   5,   6,   7,   8,   9,  10,  11,  12,
         13,  14,  15,  16,  17,  18,  19,  20,  21,  22,  23,  24,  25,
         26,  27,  28,  29,  30,  11,  31,  32,  33,  34,  35,  36,  37,
         38,  39,  40,  41,  23,  42,  43,  44,   7,  45,  46,  47,  48,
@@ -57,49 +56,37 @@ cdef unsigned char[:] complementer_432mer = bytearray([  0,   1,   2,   3,   4,
        152, 138, 160, 161, 159, 148, 162, 163, 157, 145, 164, 163, 154,
        141, 165, 161, 151, 137, 166, 165, 158, 147, 167, 164, 156, 144,
        167, 162, 153, 140, 166, 160, 150, 136, 168, 169, 170, 171, 172,
-       173, 174, 170, 175, 176, 173, 169, 177, 175, 172, 168])
+       173, 174, 170, 175, 176, 173, 169, 177, 175, 172, 168], dtype=_np.uint8)
 
-cpdef zeros(typecode, size):
-    arr = array.array(typecode)
-    array.resize(arr, size)
-    array.zero(arr)
+cdef int reverse_complement_fourmer(int num):
+    """Reverse-complements a fourmer.
+    The input and output fourmers are represented by their alphabetic order.
+    E.g. 92 (CCTA is 92nd 4mer) -> 202 (TAGG, the 202nd)"""
     
-    return array
-
-cpdef int reverse_complement_kmer(int kmer, int k):
-    """Given a kmer represented as an integer and the corresponding k,
-    returns an integer corresponding to the reverse-complement.
-    
-    A, C, G, T = 0, 1, 2, 3, hence ATG = 0b001110 = 14"""
-    
-    cdef int i
     cdef int result = 0
+    cdef int inverse = num ^ 0b11111111
     
-    # For each base in put from left to right:
-    # Bitshift to get the right base in input
-    # AND it to remove all the other bases, only focusing on that
-    # XOR to complement it
-    # Bitshift it back to the reversed position
-    for i in range(0, k + k, 2):
-        result += (kmer >> i & 0b11 ^ 0b11) << (k + k - 2 - i)
-        
+    # Here, from rightmost base to leftmose base, invert it (complement it),
+    # Then move it to the right position. Each base is added independently to result
+    result += (inverse & 0b11) << 6
+    result += ((inverse >> 2) & 0b11) << 4
+    result += ((inverse >> 4) & 0b11) << 2
+    result += (inverse >> 6) & 0b11
+    
     return result
 
-#@cython.boundscheck(False)
-#@cython.wraparound(False)
-cdef void c_kmercounts(unsigned char[:] bytesarray, int k, int[:] counts):
+cdef void tetnuccounts(unsigned char[:] bytesarray, int[:] counts):
     """Count tetranucleotides of contig and put them in counts vector.
     
     The bytearray is expected to be np.uint8 of bytevalues of the contig.
-    The counts is expected to be an array of 4^k 32-bit integers with value 0"""
+    The counts is expected to be an array of 256 32-bit integers with value 0"""
     
     cdef int kmer = 0
     cdef int character
     cdef int charvalue
     cdef int i
-    cdef int countdown = k - 1
+    cdef int countdown = 3
     cdef int contiglength = len(bytesarray)
-    cdef int mask = (1 << 2 * k - 2) - 1
             
     for i in range(contiglength):
         character = bytesarray[i]
@@ -114,44 +101,22 @@ cdef void c_kmercounts(unsigned char[:] bytesarray, int k, int[:] counts):
             charvalue = 3
         else:
             kmer = 0
-            countdown = k - 1
+            countdown = 3
             continue
         
         kmer += charvalue
         
-        # Countdown skips non-ACGT bases
         if countdown == 0:
             counts[kmer] += 1
-            kmer &= mask # Remove leftmost base 
+            kmer &= 0b111111 # Remove leftmost base 
         
         else:
             countdown -= 1
             
         kmer <<= 2 # Shift to prepare for next base
-        
-cpdef _kmercounts(bytearray sequence, int k):
-    """Returns a 32-bit integer array containing the count of all kmers
-    in the given bytearray.
-    
-    Only Kmers containing A, C, G, T (bytes 65, 67, 71, 84) are counted"""
-    
-    if k > 10 or k < 1:
-        return ValueError('k must be between 1 and 10, inclusive.')
-    
-    counts = zeros('i', 4**k)
-        
-    cdef unsigned char[:] sequenceview = sequence
-    cdef int[:] countview = counts
-    
-    c_kmercounts(sequenceview, k, countview)
-    
-    return counts
 
-#@cython.boundscheck(False)
-#@cython.wraparound(False)
-#@cython.cdivision(True)
-cdef void c_fourmer_freq(int[:] counts, float[:] result):
-    """Puts kmercounts of k=4 in a nonredundant vector.
+cdef void _tnf(unsigned char[:] bytearray, int[:] counts, float[:] result):
+    """Puts TNF freqs in the results vector.
     
     The result is expected to be a 136 32-bit float vector
     The counts is expected to be an array of 256 32-bit integers
@@ -159,42 +124,36 @@ cdef void c_fourmer_freq(int[:] counts, float[:] result):
     
     cdef int countsum = 0
     cdef int i
-    cdef unsigned char[:] converter = complementer_fourmer
+    cdef unsigned char[:] converter = complementer
+    
+    for i in range(256):
+        counts[i] = 0
+    
+    tetnuccounts(bytearray, counts)
     
     for i in range(256):
         countsum += counts[i]
         
-    if countsum == 0:
-        return
-    
     cdef float floatsum = <float>countsum
-
+        
     for i in range(256):
         result[converter[i]] += counts[i] / floatsum
-            
+
 # Assining these arrays for each sequence takes about 6% longer time than
 # having assigned them once in userspace. Worth it.
-cpdef _fourmerfreq(bytearray sequence):
-    """Returns float32 array of 136-length float32 representing the 
-    tetranucleotide (fourmer) frequencies of the DNA.
-    Only fourmers containing A, C, G, T (bytes 65, 67, 71, 84) are counted"""
+cpdef tnf(unsigned char[:] sequence):
+    """Returns 136-length float32 vector of TNF of DNA sequences.
+    The DNA must be uppercase, represented as np.uint8 vector"""
     
-    counts = zeros('i', 256)
-    frequencies = zeros('f', 136)
+    cdef int[:] counts = _np.empty(256, dtype=_np.int32)
+    result = _np.zeros(136, dtype=_np.float32)
+    cdef float[:] resultmem = result
+    
+    _tnf(sequence, counts, resultmem)
+    return result
         
-    cdef unsigned char[:] sequenceview = sequence
-    cdef int[:] fourmercountview = counts
-    cdef float[:] frequencyview = frequencies
-    
-    c_kmercounts(sequenceview, 4, fourmercountview)
-    c_fourmer_freq(fourmercountview, frequencyview)
-    
-    return frequencies
-
-#@cython.boundscheck(False)
-#@cython.wraparound(False)
-cdef void c_432mercounts(unsigned char[:] bytesarray, int[:] counts):
-    """Count 4,3 and 2 mers of contig and put them in counts vector.
+cdef void kmer432counts(unsigned char[:] bytesarray, int[:] counts):
+    """Count tetranucleotides of contig and put them in counts vector.
     
     The bytearray is expected to be np.uint8 of bytevalues of the contig.
     The counts is expected to be an array of 336 32-bit integers with value 0.
@@ -237,17 +196,15 @@ cdef void c_432mercounts(unsigned char[:] bytesarray, int[:] counts):
         countdown -= 1
         
         kmer <<= 2 # Shift to prepare for next base
-
-#@cython.boundscheck(False)
-#@cython.wraparound(False)
-cdef void c_freq_432mers(unsigned char[:] bytesarray, int[:] counts, float[:] result):
-    cdef unsigned char[:] converter = complementer_432mer
+        
+cdef void _freq_432mers(unsigned char[:] bytearray, int[:] counts, float[:] result):
+    cdef unsigned char[:] converter = complementer2
     cdef float fourfactor = 0
     cdef float threefactor = 0
     cdef float twofactor = 0
     cdef int i
     
-    c_432mercounts(bytesarray, counts)
+    kmer432counts(bytearray, counts)
     
     for i in range(336):
         if i < 256:
@@ -272,18 +229,89 @@ cdef void c_freq_432mers(unsigned char[:] bytesarray, int[:] counts, float[:] re
         else:
             result[converter[i]] += counts[i] * twofactor
             
-cpdef _freq_432mers(bytearray sequence):
-    """Returns float32 array of 178-length float32 representing the 
-    fourmer, threemer and twomer frequencies of the DNA.
-    The first 136 are nonredundant fourmer frequencies, the next 32 are
-    nonredundant threemer frequencies, and the last 10 for twomers.
-    Only kmers containing A, C, G, T (bytes 65, 67, 71, 84) are counted"""
+cpdef freq_432_mers(unsigned char[:] sequence):
+    """Returns 136-length float32 vector of 4, 3, and 2 mers of DNA sequences.
+    The DNA must be uppercase, represented as np.uint8 vector"""
     
-    counts = zeros('i', 336)
-    frequencies = zeros('f', 178)
+    cdef int[:] counts = _np.zeros(336, dtype=_np.int32)
+    result = _np.zeros(178, dtype=_np.float32)
+    cdef float[:] resultmem = result
     
-    cdef int[:] countmem = counts
-    cdef float[:] frequencymem = frequencies
+    _freq_432mers(sequence, counts, resultmem)
+    return result
+        
+cdef void _markov_normalized_tnf(unsigned char[:] bytearray, int[:] counts, float[:] frequencies, float[:] result):
+    """Puts TNF freqs in the results vector.
     
-    c_freq_432mers(sequence, countmem, frequencymem)
-    return frequencies
+    The result is expected to be a 136 32-bit float vector
+    The counts is expected to be an array of 336 32-bit integers
+    The frequencues is expected to be an array of 336 32-bit floats
+    For counts and frequencies, the first 256 is 4-mers, the next 64 is 3-mers and the last 16 2-mers.
+    """
+    
+    cdef int foursum = 0
+    cdef int threesum = 0
+    cdef int twosum = 0
+    cdef int i
+    cdef int reverse
+    cdef float value
+    cdef unsigned char[:] converter = complementer
+    
+    for i in range(336):
+        counts[i] = 0
+        frequencies[i] = 0.0
+    
+    kmer432counts(bytearray, counts)
+
+    for i in range(336):
+        if counts[i] == 0: # prevent division by zero
+            counts[i] = 1 
+        
+        if i >= 256+64:
+            twosum += counts[i]
+        elif i >= 256:
+            threesum += counts[i]
+        else:
+            foursum += counts[i]
+    
+    # Invert here so when we normalize we do multiply (cheap) not divide (expensive)
+    cdef float fourfactor = 1 / <float>foursum
+    cdef float threefactor = 1 / <float>threesum
+    cdef float twofactor = 1 / <float>twosum
+
+    # Normalize by counts here  (the factors are inverted above)
+    for i in range(336):
+        if i >= 256+64:
+            frequencies[i] = counts[i] * twofactor
+        elif i >= 256:
+            frequencies[i] = counts[i] * threefactor
+        else:
+            frequencies[i] = counts[i] * fourfactor
+            
+    for i in range(256):
+        reverse = reverse_complement_fourmer(i)            
+        
+        # This is the actual Markov normalization:
+        # 1: f(n1n2n3n4)
+        value = frequencies[i] + frequencies[reverse]
+        # 2: Times f(n2n3)
+        value *= frequencies[((i & 0b111100) >> 2) + 320] + frequencies[((reverse & 0b111100) >> 2) + 320]
+        # 3: Divided by f(n1n2n3)
+        value /= frequencies[((i & 0b11111100) >> 2) + 256] + frequencies[((reverse & 0b11111100) >> 2) + 256]
+        # 4: Divided by f(n2n3n4)
+        value /= frequencies[(i & 0b111111) + 256] + frequencies[(reverse & 0b111111) + 256]
+        
+        result[converter[i]] += value
+
+# Only about 14% slower than function tnf(sequence)
+cpdef markov_normalized_tnf(unsigned char[:] sequence):
+    """Returns 136-length float32 vector of TNF of DNA sequences.
+    The DNA must be uppercase, represented as np.uint8 vector"""
+    
+    cdef int[:] counts = _np.empty(336, dtype=_np.int32)
+    cdef float[:] frequencies = _np.empty(336, dtype=_np.float32)
+    result = _np.zeros(136, dtype=_np.float32)
+    cdef float[:] resultmem = result
+    
+    _markov_normalized_tnf(sequence, counts, frequencies, resultmem)
+    return result
