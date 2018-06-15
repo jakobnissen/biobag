@@ -1,0 +1,69 @@
+============================== DOWNLOAD v. 0.6 ==============================
+
+Created by Jakob Nybo Nissen, Technical University of Denmark 2016-12-20.
+Please contact me at jakni@dtu.dk for bug fixes and feature requests.
+
+-------------------------------- WHAT IT DOES -------------------------------
+
+The script connects to the European Nucleotide Archive (ENA) and downloads
+the metadata associated with a particular accession ID. It then uses that
+metadata to download all the associated fastq files that are not already found
+in the given directory. If the metadata suggests an experiment is paired end
+read, but only one file is associated, it automatically deinterleaves it.
+
+-------------------------------- REQUIREMENTS --------------------------------
+
+The script requires only the Python standard library. It has been tested with
+Python 3.5 exclusively, but will probably work on all version of Python 3.
+
+Deinterleaving is reliant on Bash. This function is therefore reserved for 
+UNIX-systems with Bash installed at /bin/bash, and is automatically disabled
+if non-UNIX system or lack of /bin/bash is detected.
+
+----------------------------------- USAGE -----------------------------------
+
+python downloadv0.6.py [OPTIONS] [DIRECTORY] [ACCESSION]...
+
+example download (~5 MiB):
+
+python downloadv0.6.py data PRJEB2772 --config
+
+options:
+-c          Number of child processes to spawn for parallel downloading
+--quiet     Suppress non-error output
+--metadata  Write metadata to log file, do not download any files.
+--config    Write JSON configuration file for use for canopy clusteting
+--letleave  Disable automatic deinterleaving
+
+-------------- INTEROPERABILITY WITH CANOPY CLUSTERING PIPELINE --------------
+
+The JSON config file produced with the --config argument can be used as input
+for the canopy clustering snakemake pipeline. Example:
+
+python downloadv0.6.py dir PRJEB2772 --config
+snakemake -s canopy.snakefile --cores 8 --configfile dir/PRJEB2772/config.json
+
+------------------------------ TROUBLESHOOTING ------------------------------
+
+I recieve "[Errno 104] Connection reset by peer".
+                               - OR -
+I get an error: "timed out". 
+    ENA is likely sluggish and disconnects you. Check if you can manually
+    download a file reasonably fast. If not, that may be why it's failing.
+    This could be solved by reimplementing the script to make it use wget,
+    but do you really want to download many GiB a few KiB/s?
+    
+I get an error saying that a file's size does not fit its metadata
+    This can occur if you already have a differently-sized file with the same
+    name at the destination.
+    Else, it is likely that the connection failed in the middle of the
+    download, and only part of the file got downloaded. Delete it, try again.
+
+Why can't the script determine the PHRED encoding for my files?
+    There can be several reasons:
+    1) Some files were only partly downloaded and cannot be parsed. Check if
+       there are other errors regarding the downloading of files.
+    2) One of the files had less than 25 reads, so guessing is too uncertain.
+    3) The PHRED encoding is neither 33 nor 64, the most common standards.
+
+==============================================================================

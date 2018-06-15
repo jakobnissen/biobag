@@ -12,6 +12,13 @@ from cpython cimport array
 # E.g CCTA is the 92nd alphabetic 4mer, whose reverse complement, TAGG, is the 202nd.
 # So the 92th and 202th value in this array is the same.
 # Hence we can map 256 4mers to 136 normal OR reverse-complemented ones
+
+cdef unsigned char[:] complementer_threemer = bytearray([0, 1, 2, 3, 4, 5,
+        6, 7, 8, 9, 10, 7, 11, 12, 13, 3, 14, 15, 16, 13, 17, 18, 19, 10,
+        20, 21, 19, 6, 22, 23, 16, 2, 24, 25, 23, 12, 26, 27, 21, 9, 28,
+        27, 18, 5, 29, 25, 15, 1, 30, 29, 22, 11, 31, 28, 20, 8, 31, 26,
+        17, 4, 30, 24, 14, 0])
+
 cdef unsigned char[:] complementer_fourmer = bytearray([0, 1, 2, 3, 4, 5, 6, 7, 
         8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
         18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 11, 31, 32,
@@ -64,7 +71,7 @@ cpdef zeros(typecode, size):
     array.resize(arr, size)
     array.zero(arr)
     
-    return array
+    return arr
 
 cpdef int reverse_complement_kmer(int kmer, int k):
     """Given a kmer represented as an integer and the corresponding k,
@@ -129,7 +136,7 @@ cdef void c_kmercounts(unsigned char[:] bytesarray, int k, int[:] counts):
             
         kmer <<= 2 # Shift to prepare for next base
         
-cpdef _kmercounts(bytearray sequence, int k):
+cpdef kmercounts(bytearray sequence, int k):
     """Returns a 32-bit integer array containing the count of all kmers
     in the given bytearray.
     
@@ -146,6 +153,48 @@ cpdef _kmercounts(bytearray sequence, int k):
     c_kmercounts(sequenceview, k, countview)
     
     return counts
+
+#@cython.boundscheck(False)
+#@cython.wraparound(False)
+#@cython.cdivision(True)
+cdef void c_threemer_freq(int[:] counts, float[:] result):
+    """Puts kmercounts of k=3 in a nonredundant vector.
+    
+    The result is expected to be a 32 32-bit float vector
+    The counts is expected to be an array of 64 32-bit integers
+    """
+    
+    cdef int countsum = 0
+    cdef int i
+    cdef unsigned char[:] converter = complementer_threemer
+    
+    for i in range(64):
+        countsum += counts[i]
+        
+    if countsum == 0:
+        return
+    
+    cdef float floatsum = <float>countsum
+
+    for i in range(64):
+        result[converter[i]] += counts[i] / floatsum
+        
+cpdef threemerfreq(bytearray sequence):
+    """Returns float32 array of 32-length float32 representing the 
+    threemer frequencies of the DNA.
+    Only fourmers containing A, C, G, T (bytes 65, 67, 71, 84) are counted"""
+    
+    counts = zeros('i', 64)
+    frequencies = zeros('f', 32)
+        
+    cdef unsigned char[:] sequenceview = sequence
+    cdef int[:] threemercountview = counts
+    cdef float[:] frequencyview = frequencies
+    
+    c_kmercounts(sequenceview, 3, threemercountview)
+    c_threemer_freq(threemercountview, frequencyview)
+    
+    return frequencies
 
 #@cython.boundscheck(False)
 #@cython.wraparound(False)
@@ -174,7 +223,7 @@ cdef void c_fourmer_freq(int[:] counts, float[:] result):
             
 # Assining these arrays for each sequence takes about 6% longer time than
 # having assigned them once in userspace. Worth it.
-cpdef _fourmerfreq(bytearray sequence):
+cpdef fourmerfreq(bytearray sequence):
     """Returns float32 array of 136-length float32 representing the 
     tetranucleotide (fourmer) frequencies of the DNA.
     Only fourmers containing A, C, G, T (bytes 65, 67, 71, 84) are counted"""
@@ -272,7 +321,7 @@ cdef void c_freq_432mers(unsigned char[:] bytesarray, int[:] counts, float[:] re
         else:
             result[converter[i]] += counts[i] * twofactor
             
-cpdef _freq_432mers(bytearray sequence):
+cpdef freq_432mers(bytearray sequence):
     """Returns float32 array of 178-length float32 representing the 
     fourmer, threemer and twomer frequencies of the DNA.
     The first 136 are nonredundant fourmer frequencies, the next 32 are

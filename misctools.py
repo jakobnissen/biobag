@@ -11,7 +11,11 @@ Author: Jakob Nybo Nissen, DTU Bioinformatics
 
 import collections as _collections
 import gzip as _gzip
-from misctools_c import reverse_complement_kmer, _kmercounts, _fourmerfreq, _freq_432mers
+from misctools_c import reverse_complement_kmer
+from misctools_c import kmercounts as _kmercounts
+from misctools_c import threemerfreq as _threemerfreq
+from misctools_c import fourmerfreq as _fourmerfreq
+from misctools_c import freq_432mers as _freq_432mers
 
 
 
@@ -170,16 +174,9 @@ class FastaEntry:
     complementtable = bytes.maketrans(b'ACGTMRWSYKVHDBN', b'TGCAKYWSRMBDHVN')
     
     def __init__(self, header, sequence):
-        if not header or not sequence:
-            raise ValueError('Header and sequence must be nonempty')
-        
-        if header[0] == '>' or header[0] == 62:
-            header = header[1:]
-        
-        if isinstance(header, str):
-            self.header = header
-        else:
-            self.header = header.decode('ASCII')
+        if header[0] in ('>', '#') or header[0].isspace():
+            raise ValueError('Header cannot begin with #, > or whitespace')
+        self.header = header
             
         if isinstance(sequence, bytearray):
             self.sequence = sequence
@@ -281,12 +278,15 @@ class FastaEntry:
     def fourmer_freq(self):
         return _fourmerfreq(self.sequence)
     
+    def threemer_freq(self):
+        return _threemerfreq(self.sequence)
+    
     def freq_432mers(self):
         return _freq_432mers(self.sequence)
 
 
 
-def iterfasta(filehandle, alphabet=None):
+def iterfasta(filehandle, alphabet=None, comment='#'):
     """A generator which yields FastaEntries from an open fasta file.
     
     Usage:
@@ -306,12 +306,20 @@ def iterfasta(filehandle, alphabet=None):
     
     # Skip to first header
     for probeline in filehandle:
-        if probeline.startswith('>'):
+        stripped = probeline.lstrip()
+        if stripped.startswith(comment):
+            pass
+
+        elif probeline[0] == '>':
             break
+
+        else:
+            raise TypeError('First non-comment line is not a Fasta header')
+
     else: # nobreak
-        raise ValueError('No headers in this file.')
+        raise TypeError('Empty or outcommented file')
     
-    header = probeline.rstrip('>\n')
+    header = probeline[1:-1]
     buffer = list()
     
     # Iterate over lines
