@@ -63,18 +63,18 @@ function composition_nostep(::Type{T}, x::BioSequence{A}) where {T<:Kmer, A<:Nuc
     end
 
     for i in 1:length(x)
-        kmer <<= 2
         @inbounds nuc = x[i]
         @inbounds value = kmerof[reinterpret(UInt8, nuc) + 1]
         if value == 0x04 # ambiguous nucleotide
             unfilled = BioSequences.kmersize(T) - 1
-            continue
-        end
-        if unfilled == 0
+        elseif unfilled == 0
             kmer |= value
             increment!(counts, T, kmer & mask + 1)
+            kmer <<= 2
         else
+            kmer |= value
             unfilled -= 1
+            kmer <<= 2
         end
     end
     return convert_to_composition(counts, T)
@@ -100,20 +100,21 @@ function composition_step(x::BioSequences.EachKmerIterator{T}) where {T}
     frame = 0
     i = x.start
     while i <= length(x.seq)
-        kmer <<= 2
         @inbounds nuc = x.seq[i]
         @inbounds value = kmerof[reinterpret(UInt8, nuc) + 1]
         if value == 0x04 # ambiguous nucleotide
             unfilled = BioSequences.kmersize(T) - 1
             continue
-        end
-        if unfilled == 0
+        elseif unfilled == 0
             kmer |= value
             if frame == 0
                 increment!(counts, T, kmer & mask + 1)
             end
+            kmer <<= 2
         else
             unfilled -= 1
+            kmer |= value
+            kmer <<= 2
         end
         i += jumpsize
         frame += jumpsize
