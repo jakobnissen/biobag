@@ -2,7 +2,13 @@ module t
 
 using BioSequences
 
-composition(x::BioSequences.EachKmerIterator{T,S}) where {T,S} = composition_internal(x, Val(x.step == 1))
+function composition(x::BioSequences.EachKmerIterator{T,S}) where {T,S}
+    if x.step == 1
+        return composition_nostep(T, x.seq)
+    else
+        return composition_step(x)
+    end
+end
 
 ############## Everything below here is internals ##########################
 
@@ -40,9 +46,7 @@ function convert_to_composition(counts, T)
     end
 end
 
-# Onestep value dispatch means the operations which keep track of the frame are
-# compiled away if they're not needed. This takes about 20% off the time.
-function composition_internal(x::BioSequences.EachKmerIterator{T, S}, onestep::T2) where {T, S, T2<:Union{Val{true},Val{false}}}
+function composition_nostep(::Type{T}, x::BioSequence{A}) where {T<:Kmer, A<:NucAlphs}
     BioSequences.checkkmer(T)
     kmer = typemin(UInt64)
 
@@ -58,16 +62,44 @@ function composition_internal(x::BioSequences.EachKmerIterator{T, S}, onestep::T
         counts = Dict{T, Int}()
     end
 
-    frame = 1
-    for i in x.start:length(x.seq)
-        if typeof(onestep) == Val{false}
-            if frame == x.step
-                frame = 1
-            else
-                frame += 1
-            end
+    for i in 1:length(x)
+        kmer <<= 2
+        @inbounds nuc = x[i]
+        @inbounds value = kmerof[reinterpret(UInt8, nuc) + 1]
+        if value == 0x04 # ambiguous nucleotide
+            unfilled = BioSequences.kmersize(T) - 1
+            continue
         end
+        if unfilled == 0
+            kmer |= value
+            increment!(counts, T, kmer & mask + 1)
+        else
+            unfilled -= 1
+        end
+    end
+    return convert_to_composition(counts, T)
+end
 
+function composition_step(x::BioSequences.EachKmerIterator{T}) where {T}
+    BioSequences.checkkmer(T)
+    kmer = typemin(UInt64)
+
+    # When the unfilled bases reaches 0, we have observed K unambiguous nucleotides.
+    # and we can increment the Kmercounter. Reset unfilled if we see an
+    # ambiguous nucleotide.
+    unfilled = BioSequences.kmersize(T) - 1
+    mask = UInt64(1) << (2 * BioSequences.kmersize(T)) - UInt64(1)
+    jumpsize = max(1, x.step - BioSequences.kmersize(T))
+
+    if BioSequences.kmersize(T) ≤ 8
+        counts = zeros(Int, 4^BioSequences.kmersize(T))
+    else
+        counts = Dict{T, Int}()
+    end
+
+    frame = 0
+    i = x.start
+    while i <= length(x.seq)
         kmer <<= 2
         @inbounds nuc = x.seq[i]
         @inbounds value = kmerof[reinterpret(UInt8, nuc) + 1]
@@ -76,17 +108,17 @@ function composition_internal(x::BioSequences.EachKmerIterator{T, S}, onestep::T
             continue
         end
         if unfilled == 0
-            if typeof(onestep) == Val{true}
-                kmer |= value
+            kmer |= value
+            if frame == 0
                 increment!(counts, T, kmer & mask + 1)
-            else
-                if frame == 1
-                    kmer |= value
-                    increment!(counts, T, kmer & mask + 1)
-                end
             end
         else
             unfilled -= 1
+        end
+        i += jumpsize
+        frame += jumpsize
+        if frame == x.step
+            frame = 0
         end
     end
     return convert_to_composition(counts, T)
@@ -94,8 +126,9 @@ end
 
 ####################### Benchmarking ########################
 # The new implementation is faster in all cases, but the difference
-# is only appreciable for long sequences, especially at low K.
-# In the best cases, the new implementation is ~4x faster on my laptop.
+# is only appreciable for long sequences, especially at low K and higher stepsizes
+# In the best cases, the new implementation is ~6x faster on my laptop.
+# In more typical cases, it's 3-4 times faster.
 
 using BenchmarkTools
 
@@ -111,17 +144,20 @@ function benchmark()
                      rand_10k_4bit, rand_10k_2bit,
                      rand_1m_4bit, rand_1m_2bit)
         for k in [4, 20]
-            bits = typeof(sequence).parameters[1].parameters[1]
-            println(length(sequence), " nt, ", bits, " bit, k = ", k)
+            for step in [1, 2, 25]
+                kmerit = each(Kmer{DNA, k}, sequence, step)
+                bits = typeof(sequence).parameters[1].parameters[1]
+                println(length(sequence), " nt, ", bits, " bit, k = ", k, ", step = ", step)
 
-            print("Old: ")
-            x = BioSequences.composition(each(Kmer{DNA,k}, sequence))
-            @btime BioSequences.composition(each(Kmer{DNA,$k}, $sequence));
+                print("Old: ")
+                x = BioSequences.composition(kmerit)
+                @btime BioSequences.composition($kmerit);
 
-            print("New: ")
-            x = composition_new(each(Kmer{DNA,k}, sequence))
-            @btime composition_new(each(Kmer{DNA,$k}, $sequence));
-            println("")
+                print("New: ")
+                x = composition(kmerit)
+                @btime composition($kmerit);
+                println("")
+            end
         end
     end
 end
